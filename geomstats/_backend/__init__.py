@@ -73,6 +73,7 @@ BACKEND_ATTRIBUTES = {
         "less_equal",
         "linspace",
         "log",
+        "log1p",
         "logical_and",
         "logical_or",
         "mat_from_diag_triu_tril",
@@ -173,6 +174,8 @@ class BackendImporter:
             from geomstats._backend import pytorch as backend
         elif backend_name == "tensorflow":
             from geomstats._backend import tensorflow as backend
+        elif backend_name == "jax":
+            from geomstats._backend import jax as backend
         else:
             raise RuntimeError("Unknown backend '{:s}'".format(backend_name))
         return backend
@@ -236,6 +239,7 @@ class BackendImporter:
             return sys.modules[fullname]
 
         _BACKEND = os.environ.get("GEOMSTATS_BACKEND")
+        os.environ['JAX_ENABLE_X64'] = 'True'
         if _BACKEND is None:
             os.environ["GEOMSTATS_BACKEND"] = _BACKEND = "numpy"
 

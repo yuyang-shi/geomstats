@@ -1,5 +1,6 @@
 """Exposes the `SpecialOrthogonal` group class."""
 
+import math
 import geomstats.algebra_utils as utils
 import geomstats.backend as gs
 import geomstats.errors
@@ -11,6 +12,7 @@ from geomstats.geometry.lie_group import LieGroup, MatrixLieGroup
 from geomstats.geometry.matrices import Matrices
 from geomstats.geometry.skew_symmetric_matrices import SkewSymmetricMatrices
 from geomstats.geometry.symmetric_matrices import SymmetricMatrices
+import jax
 
 ATOL = 1e-5
 
@@ -104,7 +106,7 @@ class _SpecialOrthogonalMatrices(MatrixLieGroup, EmbeddedManifold):
         """
         return self.random_uniform(n_samples)
 
-    def random_uniform(self, n_samples=1):
+    def random_uniform(self, state, n_samples=1):
         """Sample in SO(n) from the uniform distribution.
 
         Parameters
@@ -119,14 +121,43 @@ class _SpecialOrthogonalMatrices(MatrixLieGroup, EmbeddedManifold):
         samples : array-like, shape=[..., n, n]
             Points sampled on the SO(n).
         """
-        if n_samples == 1:
-            size = (self.n, self.n)
-        else:
-            size = (n_samples, self.n, self.n)
-        random_mat = gs.random.normal(size=size)
-        rotation_mat, _ = gs.linalg.qr(random_mat)
-        det = gs.linalg.det(rotation_mat)
-        return utils.flip_determinant(rotation_mat, det)
+        # if n_samples == 1:
+        #     size = (self.n, self.n)
+        # else:
+        #     size = (n_samples, self.n, self.n)
+        # _, random_mat = gs.random.normal(state=state, size=size)
+        # rotation_mat, _ = gs.linalg.qr(random_mat)
+        # det = gs.linalg.det(rotation_mat)
+        # return utils.flip_determinant(rotation_mat, det)
+
+        # Q, R = gs.linalg.qr(random_mat)
+        # R = gs.set_diag(R, gs.sign(gs.diagonal(R, axis1=-2, axis2=-1)))
+        # return self.compose(Q, R)
+
+        # https://github.com/scipy/scipy/blob/v1.8.0/scipy/stats/_multivariate.py
+        dim = self.n
+        H = gs.repeat(gs.expand_dims(gs.eye(self.n), 0), n_samples, 0)
+        D = gs.empty((n_samples, self.n))
+        size_x = int((dim - 1) * (dim + 2) / 2)
+        _, X = gs.random.normal(state=state, size=(n_samples, size_x))
+        idx = 0
+        for n in range(dim - 1):
+            x = X[..., idx : idx + dim - n]  # size=(n_samples, dim-n)
+            idx += dim - n
+            norm2 = gs.sum(x * x, axis=-1)
+            x0 = x[..., 0]
+            D = D.at[..., n].set(gs.sign(x[..., 0]))
+            x = x.at[..., 0].set(x[..., 0] + D[..., n] * gs.sqrt(norm2))
+            denom = gs.sqrt((norm2 - gs.power(x0, 2) + gs.power(x[..., 0], 2)) / 2.0)
+            x = x / gs.expand_dims(denom, -1)
+            # Householder transformation
+            H_diff = jax.vmap(lambda H, x: gs.outer(gs.dot(H[:, n:], x), x))(H, x)
+            H = H.at[..., n:].set(H[..., n:] - H_diff)
+        # Enforce determinant=1
+        D = D.at[..., -1].set((-1) ** (dim - 1) * gs.prod(D[..., :-1], -1))
+        # Equivalent to np.dot(np.diag(D), H) but faster, apparently
+        H = gs.transpose(gs.expand_dims(D, -1) * gs.transpose(H, (0, 2, 1)), (0, 2, 1))
+        return H
 
     def skew_matrix_from_vector(self, vec):
         """Get the skew-symmetric matrix derived from the vector.
@@ -162,6 +193,98 @@ class _SpecialOrthogonalMatrices(MatrixLieGroup, EmbeddedManifold):
             Vector.
         """
         return self.lie_algebra.basis_representation(skew_mat)
+
+    def exp_from_identity(self, tangent_vec):
+        """Compute the group exponential of the tangent vector at the identity.
+
+        For SO(3) relies on Rodrigues formula.
+
+        Parameters
+        ----------
+        tangent_vec : array-like, shape=[..., dimension]
+            Tangent vector at base point.
+
+        Returns
+        -------
+        point : array-like, shape=[..., dimension]
+            Point.
+        """
+        # return gs.linalg.expm(tangent_vec)
+        if self.n == 3:
+            skew_rot_vec = tangent_vec
+            rot_vec = self.vector_from_skew_matrix(skew_rot_vec)
+            rot_vec = self.regularize(rot_vec)  # TODO: necessary?
+
+            squared_angle = gs.sum(rot_vec**2, axis=-1)
+
+            coef_1 = utils.taylor_exp_even_func(squared_angle, utils.sinc_close_0)
+            coef_2 = utils.taylor_exp_even_func(squared_angle, utils.cosc_close_0)
+
+            term_1 = gs.eye(self.dim) + gs.einsum(
+                "...,...jk->...jk", coef_1, skew_rot_vec
+            )
+
+            squared_skew_rot_vec = Matrices.mul(skew_rot_vec, skew_rot_vec)
+
+            term_2 = gs.einsum("...,...jk->...jk", coef_2, squared_skew_rot_vec)
+
+            return term_1 + term_2
+        else:
+            return self.super().exp_from_identity(self, tangent_vec)
+
+    def log_from_identity(self, point):
+        """Compute the group logarithm of the point at the identity.
+
+        For SO(3) relies on Rodrigues formula.
+
+        Parameters
+        ----------
+        point : array-like, shape=[..., dimension]
+            Point.
+
+        Returns
+        -------
+        tangent_vec : array-like, shape=[..., dimension]
+            Group logarithm.
+        """
+        # return gs.linalg.logm(point)
+        if self.n == 3:
+            skew_rot_vec = _SpecialOrthogonal3Vectors().rotation_vector_from_matrix(point)
+            return self.skew_matrix_from_vector(skew_rot_vec)
+        else:
+            return self.super().log_from_identity(self, point)
+
+    @property
+    def log_volume(self):
+        """https://arxiv.org/pdf/math-ph/0210033.pdf"""
+        if self.n == 2:
+            return math.log(2) + math.log(math.pi)
+        elif self.n == 3:
+            return math.log(8) + 2 * math.log(math.pi)
+        else:
+            out = (self.n - 1) * math.log(2)
+            out += ((self.n - 1) * (self.n + 2) / 4) * math.log(math.pi)
+            k = gs.expand_dims(gs.arange(2, self.n + 1), axis=-1)
+            out += gs.sum(gs.gammaln(k / 2), axis=0)
+            return out
+
+    def logdetexp(self, x, y):
+        """https://github1s.com/pimdh/relie/blob/HEAD/relie/utils/so3_tools.py"""
+        # x = self.vector_from_skew_matrix(x)
+        x_norm = gs.linalg.norm(x, axis=-1)  # cast to double?
+        mask = x_norm > 1e-10
+        x_norm = gs.where(mask, x_norm, gs.ones_like(x_norm))
+
+        ratio = gs.where(
+            mask, (2 - 2 * gs.cos(x_norm)) / x_norm**2, 1 - x_norm**2 / 12
+        )
+        # return gs.log(ratio)#.to(x.dtype)
+        out = math.log(2) + gs.log1p(-gs.cos(x_norm)) - 2 * gs.log(x_norm)
+        return out
+
+    @property
+    def injectivity_radius(self):
+        return math.pi
 
 
 class _SpecialOrthogonalVectors(LieGroup):
@@ -740,11 +863,13 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         rot_vec_not_pi = self.vector_from_skew_matrix(rot_mat - rot_mat_transpose)
         mask_0 = gs.cast(gs.isclose(angle, 0.0), angle.dtype)
         mask_pi = gs.cast(gs.isclose(angle, gs.pi, atol=1e-2), angle.dtype)
+        # print("mask_pi", mask_pi.mean().item())
+        # print("mask_0", mask_0.mean().item())
         mask_else = (1 - mask_0) * (1 - mask_pi)
 
         numerator = 0.5 * mask_0 + angle * mask_else
         denominator = (
-            (1 - angle ** 2 / 6) * mask_0 + 2 * gs.sin(angle) * mask_else + mask_pi
+            (1 - angle**2 / 6) * mask_0 + 2 * gs.sin(angle) * mask_else + mask_pi
         )
 
         rot_vec_not_pi = rot_vec_not_pi * numerator / denominator
@@ -757,7 +882,8 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         diag_comp = gs.sqrt(squared_diag_comp)
         norm_line = gs.linalg.norm(vector_outer, axis=2)
         max_line_index = gs.argmax(norm_line, axis=1)
-        selected_line = gs.get_slice(vector_outer, (range(n_rot_mats), max_line_index))
+        # selected_line = gs.get_slice(vector_outer, (range(n_rot_mats), max_line_index))
+        selected_line = jax.vmap(lambda x, idx: x[..., idx])(vector_outer, max_line_index)
         signs = gs.sign(selected_line)
         rot_vec_pi = angle * signs * diag_comp
 
@@ -780,7 +906,7 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         """
         rot_vec = self.regularize(rot_vec)
 
-        squared_angle = gs.sum(rot_vec ** 2, axis=-1)
+        squared_angle = gs.sum(rot_vec**2, axis=-1)
         skew_rot_vec = self.skew_matrix_from_vector(rot_vec)
 
         coef_1 = utils.taylor_exp_even_func(squared_angle, utils.sinc_close_0)
@@ -828,7 +954,7 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         """
         rot_vec = self.regularize(rot_vec)
 
-        squared_angle = gs.sum(rot_vec ** 2, axis=-1)
+        squared_angle = gs.sum(rot_vec**2, axis=-1)
 
         coef_cos = utils.taylor_exp_even_func(squared_angle / 4, utils.cos_close_0)
         coef_sinc = 0.5 * utils.taylor_exp_even_func(
@@ -860,7 +986,7 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         half_angle = gs.arccos(cos_half_angle)
 
         coef_isinc = 2 * utils.taylor_exp_even_func(
-            half_angle ** 2, utils.inv_sinc_close_0
+            half_angle**2, utils.inv_sinc_close_0
         )
 
         rot_vec = gs.einsum("...,...i->...i", coef_isinc, quaternion[..., 1:])
@@ -1136,9 +1262,7 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         intrinsic_zyx = extrinsic_or_intrinsic == "intrinsic" and order == "zyx"
 
         if extrinsic_zyx:
-            rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_zyx(
-                tait_bryan_angles
-            )
+            rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_zyx(tait_bryan_angles)
         elif intrinsic_xyz:
             tait_bryan_angles_reversed = gs.flip(tait_bryan_angles, axis=1)
             rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_zyx(
@@ -1146,9 +1270,7 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
             )
 
         elif extrinsic_xyz:
-            rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_xyz(
-                tait_bryan_angles
-            )
+            rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_xyz(tait_bryan_angles)
         elif intrinsic_zyx:
             tait_bryan_angles_reversed = gs.flip(tait_bryan_angles, axis=1)
             rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_xyz(
@@ -1250,14 +1372,10 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
             )
 
         elif intrinsic_xyz:
-            quat = self.quaternion_from_tait_bryan_angles_intrinsic_xyz(
-                tait_bryan_angles
-            )
+            quat = self.quaternion_from_tait_bryan_angles_intrinsic_xyz(tait_bryan_angles)
 
         elif extrinsic_xyz:
-            rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_xyz(
-                tait_bryan_angles
-            )
+            rot_mat = self.matrix_from_tait_bryan_angles_extrinsic_xyz(tait_bryan_angles)
             quat = self.quaternion_from_matrix(rot_mat)
 
         elif intrinsic_zyx:
@@ -1319,9 +1437,9 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         tait_bryan_angles : array-like, shape=[..., 3]
         """
         w, x, y, z = gs.hsplit(quaternion, 4)
-        angle_1 = gs.arctan2(y * z + w * x, 1.0 / 2.0 - (x ** 2 + y ** 2))
+        angle_1 = gs.arctan2(y * z + w * x, 1.0 / 2.0 - (x**2 + y**2))
         angle_2 = gs.arcsin(-2.0 * (x * z - w * y))
-        angle_3 = gs.arctan2(x * y + w * z, 1.0 / 2.0 - (y ** 2 + z ** 2))
+        angle_3 = gs.arctan2(x * y + w * z, 1.0 / 2.0 - (y**2 + z**2))
         tait_bryan_angles = gs.concatenate([angle_1, angle_2, angle_3], axis=1)
         return tait_bryan_angles
 
@@ -1372,24 +1490,16 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         intrinsic_zyx = extrinsic_or_intrinsic == "intrinsic" and order == "zyx"
 
         if extrinsic_zyx:
-            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_xyz(
-                quaternion
-            )
+            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_xyz(quaternion)
             tait_bryan = gs.flip(tait_bryan, axis=1)
         elif intrinsic_xyz:
-            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_xyz(
-                quaternion
-            )
+            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_xyz(quaternion)
 
         elif extrinsic_xyz:
-            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_zyx(
-                quaternion
-            )
+            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_zyx(quaternion)
             tait_bryan = gs.flip(tait_bryan, axis=1)
         elif intrinsic_zyx:
-            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_zyx(
-                quaternion
-            )
+            tait_bryan = self.tait_bryan_angles_from_quaternion_intrinsic_zyx(quaternion)
 
         else:
             raise ValueError(
@@ -1475,12 +1585,12 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         )
 
         point = self.regularize(point)
-        squared_angle = gs.sum(point ** 2, axis=-1)
+        squared_angle = gs.sum(point**2, axis=-1)
 
         angle = gs.sqrt(squared_angle)
         delta_angle = angle - gs.pi
         approx_at_pi = gs.sum(
-            gs.array([TAYLOR_COEFFS_1_AT_PI[k] * delta_angle ** k for k in range(1, 7)])
+            gs.array([TAYLOR_COEFFS_1_AT_PI[k] * delta_angle**k for k in range(1, 7)])
         )
         coef_1 = utils.taylor_exp_even_func(squared_angle / 4, utils.inv_tanc_close_0)
         coef_1 = gs.where(-delta_angle < utils.EPSILON, approx_at_pi, coef_1)
@@ -1518,7 +1628,8 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         point : array-like, shape=[..., 3]
             Sample.
         """
-        random_point = gs.random.rand(n_samples, self.dim) * 2 - 1
+        random_point = gs.random.rand(n_samples, self.dim)
+        random_point = random_point * 2 - 1
         random_point = self.regularize(random_point)
 
         if n_samples == 1:

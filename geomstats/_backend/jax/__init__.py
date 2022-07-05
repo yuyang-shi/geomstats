@@ -1,9 +1,9 @@
-"""Numpy based computation backend."""
+"""Autograd based computation backend."""
 
 import math
 
-import numpy as np
-from numpy import (
+import jax.numpy as np
+from jax.numpy import (
     abs,
     all,
     allclose,
@@ -34,8 +34,8 @@ from numpy import (
     divide,
     dot,
 )
-from numpy import dtype as ndtype  # NOQA
-from numpy import (
+from jax.numpy import dtype as ndtype  # NOQA
+from jax.numpy import (
     einsum,
     empty,
     empty_like,
@@ -102,8 +102,9 @@ from numpy import (
     zeros,
     zeros_like,
 )
-from scipy.sparse import coo_matrix  # NOQA
-from scipy.special import erf, polygamma  # NOQA
+from jax.ops import index, index_add, index_update
+from jax.scipy.special import erf, polygamma  # NOQA
+from scipy.sparse import coo_matrix
 
 from ..constants import np_atol, np_rtol
 from . import autodiff  # NOQA
@@ -223,10 +224,9 @@ def assignment(x, values, indices, axis=0):
     If a list is given, it must have the same length as indices.
     """
     x_new = copy(x)
-
     use_vectorization = hasattr(indices, "__len__") and len(indices) < ndim(x)
     if _is_boolean(indices):
-        x_new[indices] = values
+        x_new = index_update(x_new, index[indices], values)
         return x_new
     zip_indices = _is_iterable(indices) and _is_iterable(indices[0])
     len_indices = len(indices) if _is_iterable(indices) else 1
@@ -238,10 +238,11 @@ def assignment(x, values, indices, axis=0):
         len_values = len(values) if _is_iterable(values) else 1
         if len_values > 1 and len_values != len_indices:
             raise ValueError("Either one value or as many values as indices")
-        x_new[indices] = values
+        indices = array(indices) if isinstance(indices, list) else indices  # NOTE: right?
+        x_new = index_update(x_new, index[indices], values)
     else:
         indices = tuple(list(indices[:axis]) + [slice(None)] + list(indices[axis:]))
-        x_new[indices] = values
+        x_new = index_update(x_new, index[indices], values)
     return x_new
 
 
@@ -276,7 +277,7 @@ def assignment_by_sum(x, values, indices, axis=0):
 
     use_vectorization = hasattr(indices, "__len__") and len(indices) < ndim(x)
     if _is_boolean(indices):
-        x_new[indices] += values
+        x_new = index_add(x_new, index[indices], values)
         return x_new
     zip_indices = _is_iterable(indices) and _is_iterable(indices[0])
     if zip_indices:
@@ -286,10 +287,11 @@ def assignment_by_sum(x, values, indices, axis=0):
         len_values = len(values) if _is_iterable(values) else 1
         if len_values > 1 and len_values != len_indices:
             raise ValueError("Either one value or as many values as indices")
-        x_new[indices] += values
+        indices = array(indices) if isinstance(indices, list) else indices  # NOTE: right?
+        x_new = index_add(x_new, index[indices], values)
     else:
         indices = tuple(list(indices[:axis]) + [slice(None)] + list(indices[axis:]))
-        x_new[indices] += values
+        x_new = index_add(x_new, index[indices], values)
     return x_new
 
 
@@ -318,7 +320,7 @@ def get_slice(x, indices):
     >>> get_slice(a, ((0, 2), (8, 9)))
     array([8, 29])
     """
-    return x[indices]
+    return x[indices]  # TODO: error when indices=(range(n_rot_mats), max_line_index) from examples/loss_and_gradient_so3.py
 
 
 def vectorize(x, pyfunc, multiple_args=False, signature=None, **kwargs):
@@ -351,8 +353,13 @@ def set_diag(x, new_diag):
     1-D array, but modifies x instead of creating a copy.
     """
     arr_shape = x.shape
-    x[..., range(arr_shape[-2]), range(arr_shape[-1])] = new_diag
-    return x
+    # x.at[..., range(arr_shape[-2]), range(arr_shape[-1])].set(new_diag)
+    # return x.at[np.diag_indices(x)].set(new_diag)
+    # diag_elements = np.diag_indices_from(x)
+    # return index_update(x, diag_elements, new_diag)
+    assert x.ndim >= 2
+    i, j = np.diag_indices(min(arr_shape[-2:]))
+    return x.at[..., i, j].set(new_diag)
 
 
 def ndim(x):
@@ -411,7 +418,7 @@ def mat_from_diag_triu_tril(diag, tri_upp, tri_low):
     (i,) = np.diag_indices(n, ndim=1)
     j, k = np.triu_indices(n, k=1)
     mat = np.zeros(diag.shape + (n,))
-    mat[..., i, i] = diag
-    mat[..., j, k] = tri_upp
-    mat[..., k, j] = tri_low
+    mat = mat.at[..., i, i].set(diag)
+    mat = mat.at[..., j, k].set(tri_upp)
+    mat = mat.at[..., k, j].set(tri_low)
     return mat

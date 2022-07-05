@@ -50,6 +50,9 @@ INV_SINHC_TAYLOR_COEFFS = [
     127.0 / 604800.0,
 ]
 INV_TANH_TAYLOR_COEFFS = [1.0, 1.0 / 3.0, -1.0 / 45.0, 2.0 / 945.0, -1.0 / 4725.0]
+TANH_TAYLOR_COEFFS = [1.0, -1.0 / 3.0, 2.0 / 15.0, -17.0 / 315.0, 62.0 / 2835.0]
+LOG_TANH_TAYLOR_COEFFS = [0., -1.0 / 3.0, 7.0 / 90.0, -62.0 / 2835.0, 127.0 / 18900.0]
+LOG1P_M_TANH_SQ_TAYLOR_COEFFS = [0., -1.0, 1.0 / 6.0, -2.0 / 45.0, 17.0 / 1260.0]
 ARCTANH_CARD_TAYLOR_COEFFS = [1.0, 1.0 / 3.0, 1.0 / 5.0, 1 / 7.0, 1.0 / 9]
 
 
@@ -87,6 +90,18 @@ inv_sinch_close_0 = {
 inv_tanh_close_0 = {
     "function": lambda x: x / gs.tanh(x),
     "coefficients": INV_TANH_TAYLOR_COEFFS,
+}
+tanh_close_0 = {
+    "function": lambda x: gs.tanh(x) / x,
+    "coefficients": TANH_TAYLOR_COEFFS,
+}
+log_tanh_close_0 = {
+    "function": lambda x: gs.log(gs.tanh(x) / x),
+    "coefficients": LOG_TANH_TAYLOR_COEFFS,
+}
+log1p_m_tanh_sq_close_0 = {
+    "function": lambda x: gs.log1p(-gs.tanh(x) ** 2),
+    "coefficients": LOG1P_M_TANH_SQ_TAYLOR_COEFFS,
 }
 arctanh_card_close_0 = {
     "function": lambda x: gs.arctanh(x) / x,
@@ -189,13 +204,11 @@ def flip_determinant(matrix, det):
     matrix_flipped : array-like, shape=[..., n, m]
         Matrix with the sign of last column changed if det < 0.
     """
-    if gs.any(det < 0):
-        ones = gs.ones(matrix.shape[-1])
-        reflection_vec = gs.concatenate([ones[:-1], gs.array([-1.0])], axis=0)
-        mask = gs.cast(det < 0, matrix.dtype)
-        sign = mask[..., None] * reflection_vec + (1.0 - mask)[..., None] * ones
-        return gs.einsum("...ij,...j->...ij", matrix, sign)
-    return matrix
+    ones = gs.ones(matrix.shape[-1])
+    reflection_vec = gs.concatenate([ones[:-1], gs.array([-1.0])], axis=0)
+    mask = gs.cast(det < 0, matrix.dtype)
+    sign = mask[..., None] * reflection_vec + (1.0 - mask)[..., None] * ones
+    return gs.einsum("...ij,...j->...ij", matrix, sign)
 
 
 def rotate_points(points, end_point):
@@ -223,6 +236,8 @@ def rotate_points(points, end_point):
     norm = gs.linalg.norm(end_point)
     q, _ = gs.linalg.qr(gs.transpose(embedded) / norm)
     new_points = gs.matmul(points[None, :], gs.transpose(q)) * norm
-    if not gs.allclose(gs.matmul(q, base_point[:, None])[:, 0], end_point):
-        new_points = -new_points
+    # if not gs.allclose(gs.matmul(q, base_point[:, None])[:, 0], end_point):
+        # new_points = -new_points
+    cond = gs.isclose(gs.matmul(q, base_point[:, None])[:, 0], end_point)
+    new_points = gs.where(cond, new_points, -new_points)
     return new_points[0]
