@@ -168,9 +168,7 @@ class _Hypersphere(EmbeddedManifold):
 
         return point_extrinsic
 
-    def tangent_spherical_to_extrinsic(
-        self, tangent_vec_spherical, base_point_spherical
-    ):
+    def tangent_spherical_to_extrinsic(self, tangent_vec_spherical, base_point_spherical):
         """Convert tangent vector from spherical to extrinsic coordinates.
 
         Convert from the spherical coordinates in the hypersphere
@@ -319,8 +317,8 @@ class _Hypersphere(EmbeddedManifold):
         _, samples = gs.random.normal(state=state, size=size)
         norms = gs.linalg.norm(samples, axis=1)
         samples = gs.einsum("..., ...i->...i", 1 / norms, samples)
-        if n_samples == 1:
-            samples = gs.squeeze(samples, axis=0)
+        # if n_samples == 1:
+        #     samples = gs.squeeze(samples, axis=0)
         return samples
 
     # def random_uniform(self, n_samples=1):
@@ -592,10 +590,7 @@ class _Hypersphere(EmbeddedManifold):
             n = gs.expand_dims(gs.arange(0, n_max + 1), axis=-1)
             t = gs.expand_dims(t, axis=0)
             coeffs = (
-                gs.exp(-n * (n + 1) * t)
-                * (2 * n + d - 1)
-                / (d - 1)
-                / self.metric.volume
+                gs.exp(-n * (n + 1) * t) * (2 * n + d - 1) / (d - 1) / self.metric.volume
             )
             inner_prod = gs.sum(x0 * x, axis=-1)
             cos_theta = gs.clip(inner_prod, -1.0, 1.0)
@@ -1051,10 +1046,7 @@ class HypersphereMetric(RiemannianMetric):
         else:
             sum_term = summand(0)
         coef = (
-            area
-            * (-1.0) ** half_dim_2
-            / 2 ** (dim - 2)
-            * gs.sqrt(gs.pi / 2 / variances)
+            area * (-1.0) ** half_dim_2 / 2 ** (dim - 2) * gs.sqrt(gs.pi / 2 / variances)
         )
 
         return coef * sum_term
