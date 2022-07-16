@@ -102,7 +102,7 @@ from jax.numpy import (
     zeros,
     zeros_like,
 )
-from jax.ops import index, index_add, index_update
+
 from jax.scipy.special import erf, polygamma  # NOQA
 from scipy.sparse import coo_matrix
 
@@ -110,7 +110,7 @@ from ..constants import np_atol, np_rtol
 from . import autodiff  # NOQA
 from . import linalg  # NOQA
 from . import random  # NOQA
-from .common import to_ndarray  # NOQA
+from .common import to_ndarray, index, index_add, index_update  # NOQA
 
 DTYPES = {
     ndtype("int32"): 0,
@@ -320,7 +320,9 @@ def get_slice(x, indices):
     >>> get_slice(a, ((0, 2), (8, 9)))
     array([8, 29])
     """
-    return x[indices]  # TODO: error when indices=(range(n_rot_mats), max_line_index) from examples/loss_and_gradient_so3.py
+    return x[
+        indices
+    ]  # TODO: error when indices=(range(n_rot_mats), max_line_index) from examples/loss_and_gradient_so3.py
 
 
 def vectorize(x, pyfunc, multiple_args=False, signature=None, **kwargs):
@@ -367,7 +369,7 @@ def ndim(x):
 
 
 def copy(x):
-    return x.copy()
+    return np.array(x, dtype=x.dtype)
 
 
 def array_from_sparse(indices, data, target_shape):
