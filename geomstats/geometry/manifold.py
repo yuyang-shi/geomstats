@@ -151,5 +151,11 @@ class Manifold(abc.ABC):
                 metric.dim = self.dim
         self._metric = metric
 
+    def exp(self, tangent_vec, base_point, **kwargs):
+        return self.metric.exp(tangent_vec, base_point, **kwargs)
+
+    def log(self, point, base_point, **kwargs):
+        return self.metric.log(point, base_point, **kwargs)
+
     def random_walk(self, rng, x, t):
         return None

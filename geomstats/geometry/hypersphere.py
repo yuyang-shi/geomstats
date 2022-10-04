@@ -676,12 +676,6 @@ class _Hypersphere(EmbeddedManifold):
     def vee(self, point):
         return point
 
-    def exp(self, tangent_vec, base_point, **kwargs):
-        return self.metric.exp(tangent_vec, base_point, **kwargs)
-
-    def log(self, point, base_point, **kwargs):
-        return self.metric.log(point, base_point, **kwargs)
-
 
 class HypersphereMetric(RiemannianMetric):
     """Class for the Hypersphere Metric.
