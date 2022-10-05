@@ -258,8 +258,7 @@ class Hyperboloid(_Hyperbolic, EmbeddedManifold):
             Tangent vector at base point.
         """
         state, ambiant_noise = gs.random.normal(state=state, size=(n_samples, self.dim))
-        ones = gs.ones((n_samples, 1))
-        ambiant_noise = gs.concatenate([ones, ambiant_noise], axis=-1)
+        ambiant_noise = gs.concatenate([gs.zeros((n_samples, 1)), ambiant_noise], axis=-1)
         ambiant_noise = self.metric.transpfrom0(base_point, ambiant_noise)
 
         return state, ambiant_noise
@@ -473,16 +472,6 @@ class HyperboloidMetric(HyperbolicMetric):
             + p_orth
         )
         return transported
-
-    def logdetexp(self, x, y):
-        """cf Nagano et al. 2019
-        det exp = (sinh(d)/d)^n cosh(d)
-        """
-        d = self.dist(x, y)
-        # log_sinch = gs.log(gs.sinh(d) / d)
-        log_sinch = utils.taylor_exp_even_func(d**2, utils.log_sinch_close_0)
-        # return self.dim * log_sinch + gs.log(gs.cosh(d))
-        return (self.dim - 1) * log_sinch
 
     @property
     def identity(self):

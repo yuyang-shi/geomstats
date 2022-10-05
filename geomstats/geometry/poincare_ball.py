@@ -338,12 +338,6 @@ class PoincareBallMetric(RiemannianMetric):
         sq_norm = sq_norm * self.lambda_x(base_point) ** 2
         return sq_norm
 
-    def logdetexp(self, x, y):
-        d = self.dist(x, y)
-        # log_sinch = gs.log(gs.sinh(d) / d)
-        log_sinch = utils.taylor_exp_even_func(d**2, utils.log_sinch_close_0)
-        return (self.dim - 1) * log_sinch
-
     def lambda_x(self, base_point):
         """G(x)=\lambda(x)^2 Id"""
         lambda_base = 2 / (1 - gs.sum(base_point * base_point, axis=-1))
