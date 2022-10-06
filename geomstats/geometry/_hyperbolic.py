@@ -570,9 +570,3 @@ class HyperbolicMetric(RiemannianMetric):
             Inner-product of the two tangent vectors.
         """
         return super().inner_product(tangent_vec_a, tangent_vec_b, base_point=base_point)
-
-    def logdetexp(self, x, y):
-        d = self.dist(x, y)
-        # log_sinch = gs.log(gs.sinh(d) / d)
-        log_sinch = utils.taylor_exp_even_func(d**2, utils.log_sinch_close_0)
-        return (self.dim - 1) * log_sinch

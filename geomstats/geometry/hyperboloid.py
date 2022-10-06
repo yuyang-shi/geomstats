@@ -263,6 +263,12 @@ class Hyperboloid(_Hyperbolic, EmbeddedManifold):
 
         return state, ambiant_noise
 
+    def hat(self, point):
+        return gs.concatenate([gs.zeros((*point.shape[:-1], 1)), point], axis=-1)
+
+    def vee(self, point):
+        return point[..., 1:]
+
 
 class HyperboloidMetric(HyperbolicMetric):
     """Class that defines operations using a hyperbolic metric.
@@ -491,3 +497,9 @@ class HyperboloidMetric(HyperbolicMetric):
         y = gs.broadcast_to(self.identity, x.shape)
         # NOTE: returning a manifold.dim dimensional vector
         return self.parallel_transport2(x, y, v)[..., 1:]
+
+    def logdetexp(self, x, y, is_vector=False):
+        d = self.norm(y, x) if is_vector else self.dist(x, y)
+        # log_sinch = gs.log(gs.sinh(d) / d)
+        log_sinch = utils.taylor_exp_even_func(d**2, utils.log_sinch_close_0)
+        return (self.dim - 1) * log_sinch

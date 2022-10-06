@@ -667,15 +667,6 @@ class _Hypersphere(EmbeddedManifold):
     def log_volume(self):
         return self.metric.log_volume
 
-    def logdetexp(self, x, y, is_vector=False):
-        return self.metric.logdetexp(x, y, is_vector)
-
-    def hat(self, point):
-        return point
-
-    def vee(self, point):
-        return point
-
 
 class HypersphereMetric(RiemannianMetric):
     """Class for the Hypersphere Metric.

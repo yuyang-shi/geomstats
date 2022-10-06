@@ -157,5 +157,14 @@ class Manifold(abc.ABC):
     def log(self, point, base_point, **kwargs):
         return self.metric.log(point, base_point, **kwargs)
 
+    def logdetexp(self, x, y, is_vector=False):
+        return self.metric.logdetexp(x, y, is_vector)
+
+    def hat(self, point):
+        return point
+
+    def vee(self, point):
+        return point
+
     def random_walk(self, rng, x, t):
         return None
