@@ -182,3 +182,6 @@ class EuclideanMetric(RiemannianMetric):
         """
         log = point - base_point
         return log
+
+    def grad(self, func):
+        return lambda x: gs.autodiff.grad(func)(x)

@@ -964,6 +964,9 @@ class HypersphereMetric(RiemannianMetric):
         sinc = utils.taylor_exp_even_func(radius_squared, utils.sinc_close_0)
         return (self.dim - 1) * gs.log(sinc)
 
+    def grad(self, func):
+        return self.embedding_metric.grad(func)
+
     @property
     def log_volume(self):
         """log area of n-sphere https://en.wikipedia.org/wiki/N-sphere#Closed_forms"""

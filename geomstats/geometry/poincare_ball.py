@@ -357,6 +357,14 @@ class PoincareBallMetric(RiemannianMetric):
         log_sinch = utils.taylor_exp_even_func(d**2, utils.log_sinch_close_0)
         return (self.dim - 1) * log_sinch
 
+    def grad(self, func):
+        def grad(x):
+            out = func(x)
+            inv_lam = 1 / 2 * gs.clip(1 - gs.power(x, 2).sum(axis=-1), 1e-15)[..., None]
+            return inv_lam**2 * out
+
+        return grad
+
     def normalization_factor(self, variances):
         """Return normalization factor of the Gaussian distribution.
 
