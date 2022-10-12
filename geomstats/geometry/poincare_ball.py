@@ -359,7 +359,7 @@ class PoincareBallMetric(RiemannianMetric):
 
     def grad(self, func):
         def grad(x):
-            out = func(x)
+            out = gs.autodiff.grad(func)(x)
             inv_lam = 1 / 2 * gs.clip(1 - gs.power(x, 2).sum(axis=-1), 1e-15)[..., None]
             return inv_lam**2 * out
 
