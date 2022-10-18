@@ -121,8 +121,8 @@ class PoincareBall(_Hyperbolic, OpenSet):
         state, ambiant_noise = gs.random.normal(
             state=state, size=(n_samples, self.ambient_space.dim)
         )
-        ambiant_noise *= self.metric.lambda_x_inv(base_point)[..., None]
-        # ambiant_noise = self.metric.transpfrom0(base_point, ambiant_noise) / 2
+        # ambiant_noise *= self.metric.lambda_x_inv(base_point)[..., None]
+        ambiant_noise = self.metric.transpfrom0(base_point, ambiant_noise)
 
         return state, ambiant_noise
 
@@ -348,13 +348,13 @@ class PoincareBallMetric(RiemannianMetric):
         return gs.clip(1 - gs.power(base_point, 2).sum(axis=-1), 1e-15) / 2
 
     def transpfrom0(self, y, v):
-        return v * self.lambda_x_inv(y)[..., None] * 2
+        return v * self.lambda_x_inv(y)[..., None]# * 2
         # return v * gs.clip(1 - gs.power(y, 2).sum(axis=-1), 1e-15)[..., None]
         # return v / self.lambda_x(y)[..., None] * 2
 
     def transpback0(self, x, v):
         # return v / gs.clip(1 - gs.power(x, 2).sum(axis=-1), 1e-15)[..., None]
-        return v * self.lambda_x(x)[..., None] / 2
+        return v * self.lambda_x(x)[..., None]# / 2
 
     def logdetexp(self, x, y, is_vector=False):
         d = self.norm(y, x) if is_vector else self.dist(x, y)
