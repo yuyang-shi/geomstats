@@ -440,7 +440,7 @@ class HyperboloidMetric(HyperbolicMetric):
         inner_prod = self.embedding_metric.inner_product(point_a, point_b)
 
         cosh_angle = -inner_prod / gs.sqrt(sq_norm_a * sq_norm_b)
-        cosh_angle = gs.clip(cosh_angle, 1.0, 1e24)
+        cosh_angle = gs.clip(cosh_angle, 1.0 + 1e-7, 1e24)
 
         dist = gs.arccosh(cosh_angle)
         dist *= self.scale
@@ -506,3 +506,9 @@ class HyperboloidMetric(HyperbolicMetric):
 
     def grad(self, func):
         return self.embedding_metric.grad(func)
+
+    def lambda_x(self, x):
+        return self.embedding_metric.lambda_x(x)
+
+    def lambda_x_inv(self, x):
+        return self.embedding_metric.lambda_x_inv(x)

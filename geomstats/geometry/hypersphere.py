@@ -967,6 +967,12 @@ class HypersphereMetric(RiemannianMetric):
     def grad(self, func):
         return self.embedding_metric.grad(func)
 
+    def lambda_x(self, x):
+        return self.embedding_metric.lambda_x(x)
+
+    def lambda_x_inv(self, x):
+        return self.embedding_metric.lambda_x_inv(x)
+
     @property
     def log_volume(self):
         """log area of n-sphere https://en.wikipedia.org/wiki/N-sphere#Closed_forms"""
