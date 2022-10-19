@@ -185,9 +185,3 @@ class EuclideanMetric(RiemannianMetric):
 
     def grad(self, func):
         return lambda x: gs.autodiff.grad(func)(x)
-
-    def lambda_x(self, x):
-        return gs.ones((*x.shape[:-1],))
-
-    def lambda_x_inv(self, x):
-        return gs.ones((*x.shape[:-1],))

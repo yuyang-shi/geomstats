@@ -128,9 +128,3 @@ class MinkowskiMetric(RiemannianMetric):
             return gs.assignment(out, -out[..., 0], (0), axis=-1)
 
         return grad
-
-    def lambda_x(self, x):
-        return gs.ones((*x.shape[:-1],))
-
-    def lambda_x_inv(self, x):
-        return gs.ones((*x.shape[:-1],))
