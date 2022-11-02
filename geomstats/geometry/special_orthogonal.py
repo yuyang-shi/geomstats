@@ -27,6 +27,97 @@ TAYLOR_COEFFS_1_AT_PI = [
 ]
 
 
+def _cumsimps(f, a, b, N=64, **kwargs):
+    # Apply Simpson's rule cumulatively with N summation terms (2N subintervals)
+    dx = (b - a) / (2*N)
+    x = gs.linspace(a, b, 2*N + 1)
+    y = f(x=x, **kwargs)
+    S = dx / 3 * gs.cumsum(y[0:-1:2] + 4 * y[1::2] + y[2::2], axis=0)
+    return x[2::2], S
+
+
+def cumsimps_cdf(pdf, a, b, N=64, **kwargs):
+    # Apply Simpson's rule to approximately compute cdf evaluations at N+1 points from pdf (supported between [a, b])
+    xp, cdf = _cumsimps(pdf, a, b, N, **kwargs)
+    xp = jax.numpy.insert(xp, 0, a)
+    cdf = jax.numpy.insert(cdf, 0, 0)
+    cdf = cdf.at[-1].set(1.0)
+    cdf = gs.clip(cdf, 0, 1)
+    return xp, cdf
+
+
+def cumsimps_cdf_smart(pdf, a, b, N=64, **kwargs):
+    # Apply Simpson's rule to approximately compute cdf evaluations at N+1 points from pdf (supported between [a, b])
+    def body_fun_1(val):
+        return val[0]/2, pdf(x=val[0]/2, **kwargs)
+    def cond_fun_1(val):
+        return val[1][0] < 1e-4
+    b_init = gs.array([b])/2
+    pd_init = pdf(x=b_init, **kwargs)
+    b_init, _ = jax.lax.while_loop(cond_fun_1, body_fun_1, (b_init, pd_init))
+    b_init = b_init[0] * 2
+
+    def body_fun_2(val):
+        return _cumsimps(pdf, a, val[0][-1]/2, N, **kwargs)
+    def cond_fun_2(val):
+        return gs.abs(val[1][-1] - 1) > 1e-4
+    x, cdf = _cumsimps(pdf, a, b_init, N, **kwargs)
+    x, cdf = jax.lax.while_loop(cond_fun_2, body_fun_2, (x, cdf))
+    x = jax.numpy.insert(x, 0, a)
+    cdf = jax.numpy.insert(cdf, 0, 0)
+    cdf = cdf.at[-1].set(1.0)
+    cdf = gs.clip(cdf, 0, 1)
+    return x, cdf
+
+
+def igso3_angle_density(var, l_max: int, x):
+    cond = (var < 1)
+    exact = _igso3_angle_density(var, l_max, x)
+    approx = _igso3_angle_density_approx(var, x)
+    prob = gs.where(cond, approx, exact)
+    return prob
+
+
+def _igso3_angle_density(var, l_max: int, x):
+    assert l_max >= 1
+    x = gs.expand_dims(x, axis=1)  # shape (batch_size, 1)
+    n = gs.expand_dims(gs.arange(0, l_max + 1), axis=0)  # shape (1, l_max + 1)
+
+    coeffs = (2*n+1) * gs.exp(-n*(n+1)*var)
+    ratios = (gs.cos(n*x) - gs.cos((n+1)*x)) / gs.pi # (1 - gs.cos(x)) / gs.pi * gs.sin((n+1/2)*x) / gs.sin(x/2)
+
+    return gs.sum(coeffs * ratios, axis=1)
+
+
+def _igso3_angle_density_approx(var, x):
+    return gs.sin(x/2) / gs.sqrt(gs.pi) * var**(-3/2) * gs.exp((var - x**2/var)/4) * (x - gs.exp((gs.pi*x-gs.pi**2)/var) * (x-2*gs.pi) + gs.exp(-(gs.pi*x+gs.pi**2)/var) * (x+2*gs.pi))
+
+
+def igso3_density(var, l_max: int, x):
+    # NOTE: nan if x==0
+    cond = (var < 1)
+    exact = _igso3_density(var, l_max, x)
+    approx = _igso3_density_approx(var, x)
+    prob = gs.where(cond, approx, exact)
+    return prob
+
+
+def _igso3_density(var, l_max: int, x):
+    assert l_max >= 1
+    # assert len(x.shape) == 1
+    x = gs.expand_dims(x, axis=-1)  # shape (batch_size, 1)
+    n = gs.arange(0, l_max + 1)  # shape (l_max + 1)
+
+    coeffs = (2*n+1) * gs.exp(-n*(n+1)*var)
+    ratios = gs.sin((n+1/2)*x) / gs.sin(x/2)
+
+    return gs.sum(coeffs * ratios, axis=-1)
+
+
+def _igso3_density_approx(var, x):
+    return gs.sqrt(gs.pi) * var**(-3/2) * gs.exp((var - x**2/var)/4) * (x - gs.exp((gs.pi*x-gs.pi**2)/var) * (x-2*gs.pi) + gs.exp(-(gs.pi*x+gs.pi**2)/var) * (x+2*gs.pi)) / (2 * gs.sin(x/2))
+
+
 class _SpecialOrthogonalMatrices(MatrixLieGroup, EmbeddedManifold):
     """Class for special orthogonal groups in matrix representation.
 
@@ -253,6 +344,55 @@ class _SpecialOrthogonalMatrices(MatrixLieGroup, EmbeddedManifold):
             return self.skew_matrix_from_vector(skew_rot_vec)
         else:
             return self.super().log_from_identity(self, point)
+
+    def random_walk(self, rng, x, t, n_max=5):
+        if self.n == 3:
+            _, rng1, rng2 = jax.random.split(rng, 3)
+
+            # First randomly sample rotation axis, i.e. randomly sample on S2
+            size = (x.shape[0], 3)
+            _, samples = gs.random.normal(state=rng1, size=size)
+            norms = gs.linalg.norm(samples, axis=1)
+            axis_samples = gs.einsum("..., ...i->...i", 1 / norms, samples)
+
+            # Next use inversion sampling to sample rotation angle
+            t = t / 4  # NOTE: to match random walk
+
+            def inversion_sample(x, t, l_max=n_max):
+                a = 0
+                b = gs.pi
+                xp, cdf = cumsimps_cdf_smart(igso3_angle_density, a, b, var=t, l_max=l_max)
+                return jax.numpy.interp(x, cdf, xp)
+
+            inversion_sample_vmap = jax.vmap(inversion_sample, (0, 0))
+            _, samples = gs.random.uniform(state=rng2, size=(x.shape[0], 1))
+            angle_samples = inversion_sample_vmap(samples, t)  # shape (batch_size, 1)
+            angle_samples = gs.expand_dims(angle_samples, -1)  # shape (batch_size, 1, 1)
+
+            # Finally apply transform to x
+            skew_rot_vec = self.skew_matrix_from_vector(axis_samples)
+            squared_skew_rot_vec = Matrices.mul(skew_rot_vec, skew_rot_vec)
+            rot_mat_samples = gs.eye(self.n) + gs.sin(angle_samples) * skew_rot_vec + (1 - gs.cos(angle_samples)) * squared_skew_rot_vec
+            samples = self.compose(x, rot_mat_samples)
+            return samples
+        else:
+            return None
+
+    def _log_heat_kernel(self, x0, x, t, n_max):
+        assert x0.shape[-2] == x0.shape[-1] == x.shape[-2] == x.shape[-1]
+
+        t = t / 4  # NOTE: to match random walk
+
+        if self.n == 3:
+            rot_mat = self.compose(self.inverse(x0), x)
+            trace = gs.trace(rot_mat, axis1=-2, axis2=-1)
+            trace_num = gs.clip(trace, -1, 3)
+            angle = gs.arccos(0.5 * (trace_num - 1))  # shape (batch_size,)
+            prob = igso3_density(t, n_max, angle)
+            return gs.log(prob)
+        
+        else:
+            raise NotImplementedError
 
     @property
     def log_volume(self):
@@ -904,7 +1044,7 @@ class _SpecialOrthogonal3Vectors(_SpecialOrthogonalVectors):
         rot_mat: array-like, shape=[..., 3]
             Rotation matrix.
         """
-        rot_vec = self.regularize(rot_vec)
+        # rot_vec = self.regularize(rot_vec)
 
         squared_angle = gs.sum(rot_vec**2, axis=-1)
         skew_rot_vec = self.skew_matrix_from_vector(rot_vec)

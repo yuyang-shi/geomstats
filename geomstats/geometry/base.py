@@ -352,10 +352,12 @@ class EmbeddedManifold(Manifold, abc.ABC):
         return gs.where(cond, approx, exact)
 
     def grad_log_heat_kernel_exp(self, x0, x, t):
-        return self.metric.log(x0, x) / gs.expand_dims(t, -1)
+        axis_to_expand = tuple(range(-1, -len(x.shape), -1))  # (-1) or (-1, -2)
+        return self.metric.log(x0, x) / gs.expand_dims(t, axis_to_expand)
 
     def grad_marginal_log_prob(self, x0, x, t, thresh, n_max):
-        cond = gs.expand_dims(t <= thresh, -1)
+        axis_to_expand = tuple(range(-1, -len(x.shape), -1))  # (-1) or (-1, -2)
+        cond = gs.expand_dims(t <= thresh, axis_to_expand)
         approx = self.grad_log_heat_kernel_exp(x0, x, t)
         log_heat_kernel = lambda x0, x, s: gs.reshape(
             self._log_heat_kernel(x0, x, s, n_max=n_max), ()
@@ -364,6 +366,7 @@ class EmbeddedManifold(Manifold, abc.ABC):
         logp_grad_fn = jax.grad(log_heat_kernel, argnums=1)
         logp_grad = jax.vmap(logp_grad_fn)(x0, x, t)
         exact = self.to_tangent(logp_grad, x)
+        cond = jax.numpy.logical_or(cond, jax.numpy.sum(jax.numpy.isnan(exact), axis_to_expand, keepdims=True) > 0)
         return gs.where(cond, approx, exact)
 
 
